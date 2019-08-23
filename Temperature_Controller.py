@@ -8,6 +8,7 @@ except:
 import re
 import glob
 import sys
+import configparser
 import numpy as np
 from time import sleep
 
@@ -33,18 +34,27 @@ class Temperature_Controller( QtCore.QObject ):
 	PID_Coefficients_Changed = QtCore.pyqtSignal(tuple) # Kp, Ki, Kd actually set
 	Pads_Selected_Changed = QtCore.pyqtSignal(tuple, bool) # Pads actually connected, were they connected in reverse order
 	Pads_Selected_Invalid = QtCore.pyqtSignal()
+	Temperature_Stable = QtCore.pyqtSignal()
 
 	def __init__( self, configuration_file, parent=None, connection_timeout=1000 ):
 		super().__init__( parent )
+
+		self.configuration_file = configuration_file
+		self.connection_timeout = connection_timeout
+		self.triggered_temp_stable_already = False
+
+	def thread_start( self ):
+		config = configparser.ConfigParser()
+		config.read( self.configuration_file )
 		self.status = Current_State()
 		success = False
 		self.serial_connection = None
-		self.identifier_string = configuration_file['Temperature_Controller']['Listener_Type']
+		self.identifier_string = config['Temperature_Controller']['Listener_Type']
 
 		try:
-			self.device_communicator = Device_Communicator( parent, identifier_string=self.identifier_string, listener_address=None,
-													port=configuration_file['Temperature_Controller']['Listener_Port'] )
-			self.device_communicator.Poll_LocalIPs_For_Devices( configuration_file['Temperature_Controller']['ip_range'] )
+			self.device_communicator = Device_Communicator( self, identifier_string=self.identifier_string, listener_address=None,
+													port=config['Temperature_Controller']['Listener_Port'] )
+			self.device_communicator.Poll_LocalIPs_For_Devices( config['Temperature_Controller']['ip_range'] )
 			success = True
 			self.device_communicator.Reply_Recieved.connect( lambda message, device : self.ParseMessage( message ) )
 			self.device_communicator.Device_Connected.connect( lambda peer_identifier : self.Device_Connected.emit( peer_identifier, "Wifi" ) )
@@ -52,7 +62,8 @@ class Temperature_Controller( QtCore.QObject ):
 
 			self.device_communicator.Device_Connected.connect( lambda peer_identifier : self.Share_Current_State() )
 
-		except:
+		except Exception as e:
+			print( e )
 			self.device_communicator = None
 
 		if( not success ):
@@ -67,22 +78,22 @@ class Temperature_Controller( QtCore.QObject ):
 		# Continuously recheck temperature controller
 		self.connection_timeout_timer = QtCore.QTimer( self )
 		self.connection_timeout_timer.timeout.connect( self.Update )
-		self.connection_timeout_timer.start( connection_timeout )
+		self.connection_timeout_timer.start( self.connection_timeout )
 
 
 		
 	def Share_Current_State( self ):
 		self.Set_Temperature_In_K( self.status.set_temperature )
-		self.Set_PID( self.status.pid_settings )
+		self.Set_PID( *self.status.pid_settings )
 		self.Set_Active_Pads( *self.status.pads_selected )
 		if self.status.pid_is_on:
 			self.Turn_On()
 		else:
 			self.Turn_Off()
 
-	def Set_PID( self, pid_settings ):
-		self.status.pid_settings = pid_settings
-		message = ("Set PID {} {} {};\n".format( *pid_settings ) )
+	def Set_PID( self, kp, ki, kd ):
+		self.status.pid_settings = ( kp, ki, kd )
+		message = ("Set PID {} {} {};\n".format( *self.status.pid_settings ) )
 		if self.serial_connection is not None:
 			self.serial_connection.write( message.encode() )
 
@@ -143,6 +154,7 @@ class Temperature_Controller( QtCore.QObject ):
 			self.serial_connection.write( message.encode() )
 
 		self.device_communicator.Send_Command( message )
+		self.triggered_temp_stable_already = False
 
 	def Turn_On( self ):
 		self.status.pid_is_on = True
@@ -175,9 +187,11 @@ class Temperature_Controller( QtCore.QObject ):
 		if( m ):
 			self.current_temperature = float( m.group( 1 ) ) + 273.15
 			self.Temperature_Changed.emit( self.current_temperature )
-			self.past_temperatures.append( self.current_temperature )
-			if( len(self.past_temperatures) > self.stable_temperature_sample_count ):
-				self.past_temperatures = self.past_temperatures[-self.stable_temperature_sample_count:]
+
+			if( self.Check_If_Temperature_Is_Stable( self.current_temperature ) and not self.triggered_temp_stable_already ):
+				self.triggered_temp_stable_already = True
+				print( "Temperature stable around: " + str(self.setpoint_temperature) + '\n' )
+				self.Temperature_Stable.emit()
 
 		pid_output_pattern = re.compile( 'PID Output:\s*({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
 		m2 = pid_output_pattern.search( message )
@@ -220,8 +234,17 @@ class Temperature_Controller( QtCore.QObject ):
 		#else:
 		#	print( message )
 
+	def Set_Temp_And_Turn_On( self, temperature_in_k ):
+		if temperature_in_k is None:
+			return
+		self.Set_Temperature_In_K( temperature_in_k )
+		self.Turn_On()
 
-	def Temperature_Is_Stable( self ):
+	def Check_If_Temperature_Is_Stable( self, new_temperature_in_k ):
+		self.past_temperatures.append( new_temperature_in_k )
+		if( len(self.past_temperatures) > self.stable_temperature_sample_count ):
+			self.past_temperatures = self.past_temperatures[-self.stable_temperature_sample_count:]
+
 		if( len(self.past_temperatures) < self.stable_temperature_sample_count ):
 			return False
 		error = np.array( self.past_temperatures ) - self.setpoint_temperature

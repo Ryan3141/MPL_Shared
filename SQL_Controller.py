@@ -61,15 +61,15 @@ def Commit_To_SQL( sql_type, sql_conn, sql_table, **commit_things ):
 
 def Commit_XY_Data_To_SQL( sql_type, sql_conn, xy_data_sql_table, xy_sql_labels, x_data, y_data, metadata_sql_table, **commit_things ):
 	get_measurement_id_string = '''SELECT MAX(measurement_id) FROM {}'''.format( metadata_sql_table )
-	meta_data_sql_string = '''INSERT INTO {}({}) VALUES({})'''.format( metadata_sql_table, ','.join( commit_things.keys() ), ','.join( ['%s'] * len(commit_things.keys()) ) )
+	meta_data_sql_string = '''INSERT INTO {}(measurement_id,{}) VALUES({})'''.format( metadata_sql_table, ','.join( commit_things.keys() ), ','.join( ['%s'] * (1 + len(commit_things.keys())) ) )
 	data_sql_string = '''INSERT INTO {}(measurement_id,{}) VALUES(%s,%s,%s)'''.format( xy_data_sql_table, ','.join( xy_sql_labels ) )
 	if sql_type == 'QSQLITE':
 		sql_insert_string.replace( '%s', '?' )
 
 	cur = sql_conn.cursor()
-	cur.execute( meta_data_sql_string, list(commit_things.values()) )
 	cur.execute( get_measurement_id_string )
-	measurement_id = int( cur.fetchone()[0] )
+	measurement_id = int( cur.fetchone()[0] ) + 1
+	cur.execute( meta_data_sql_string, [measurement_id] + list(commit_things.values()) )
 	data_as_tuple = tuple(zip([measurement_id] * len(x_data),(float(x) for x in x_data),(float(y) for y in y_data))) # mysql.connector requires a tuple or list (not generator) and native float type as input
 	cur.executemany( data_sql_string, data_as_tuple )
 	sql_conn.commit()
