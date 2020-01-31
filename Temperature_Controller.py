@@ -182,16 +182,25 @@ class Temperature_Controller( QtCore.QObject ):
 		pattern_of_a_float = r'[+-]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?'
 		debug_pattern = re.compile( r"Temperature setpoint changed to " );
 
-		temperature_pattern = re.compile( 'Temperature = ({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
+		temperature_pattern = re.compile( '(Cold Junction |Thermocouple )?Temperature = ({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
 		m = temperature_pattern.match( message )
 		if( m ):
-			self.current_temperature = float( m.group( 1 ) ) + 273.15
-			self.Temperature_Changed.emit( self.current_temperature )
+			if m.group( 1 ) == "Cold Junction ":
+				pass
+			elif m.group( 1 ) == "Thermocouple ":
+				pass
+			else: # RTD Sensor
+				temp = float( m.group( 2 ) ) + 273.15
+				print( "Reading Temperature = {}".format( temp ) )
+				if( temp < 0 or temp > 1000 ):
+					return
+				self.current_temperature = temp
+				self.Temperature_Changed.emit( self.current_temperature )
 
-			if( self.Check_If_Temperature_Is_Stable( self.current_temperature ) and not self.triggered_temp_stable_already ):
-				self.triggered_temp_stable_already = True
-				print( "Temperature stable around: " + str(self.setpoint_temperature) + '\n' )
-				self.Temperature_Stable.emit()
+				if( self.Check_If_Temperature_Is_Stable( self.current_temperature ) and not self.triggered_temp_stable_already ):
+					self.triggered_temp_stable_already = True
+					print( "Temperature stable around: " + str(self.setpoint_temperature) + '\n' )
+					self.Temperature_Stable.emit()
 
 		pid_output_pattern = re.compile( 'PID Output:\s*({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
 		m2 = pid_output_pattern.search( message )

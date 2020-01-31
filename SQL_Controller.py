@@ -19,7 +19,9 @@ def Ask_Yes_Or_No_Popup( title_of_window, message ):
 
 	return answer_was_yes
 
-def Connect_To_SQL( configuration_file_path ):
+def Connect_To_SQL( configuration_file_path, config_error_popup=None ):
+	if config_error_popup == None:
+		config_error_popup = Ask_Yes_Or_No_Popup
 	should_open_file = False
 	try:
 		configuration_file = configparser.ConfigParser()
@@ -35,19 +37,20 @@ def Connect_To_SQL( configuration_file_path ):
 		return db_type, sql_conn
 
 	except sqlite3.Error as e:
-		should_open_file = Ask_Yes_Or_No_Popup( "SQL Connection Error, Open config.ini?", "There was an issue connecting the SQL server described in the config.ini file" )
+		should_open_file = config_error_popup( "SQL Connection Error", "There was an issue connecting the SQL server described in the config.ini file\nDo you want to open config.ini?" )
 		if should_open_file:
 			os.startfile( os.path.abspath(configuration_file_path ) )
 		return None, None
 	except mysql.connector.Error as e:
-		should_open_file = Ask_Yes_Or_No_Popup( "SQL Connection Error, Open config.ini?", "There was an issue connecting the SQL server described in the config.ini file" )
+		should_open_file = config_error_popup( "SQL Connection Error", "There was an issue connecting the SQL server described in the config.ini file\nDo you want to open config.ini?" )
 		if should_open_file:
 			os.startfile( os.path.abspath(configuration_file_path ) )
 		return None, None
 	except Exception as e:
-		should_open_file = Ask_Yes_Or_No_Popup( "Error In config.ini File, Open It?", "Error finding: " + str(e) )
+		should_open_file = config_error_popup( "Error In config.ini File", "Error finding: {}\nDo you want to open config.ini?".format( str(e) ) )
 		if should_open_file:
 			os.startfile( os.path.abspath(configuration_file_path ) )
+		return None, None
 
 
 def Commit_To_SQL( sql_type, sql_conn, sql_table, **commit_things ):
