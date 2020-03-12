@@ -1,4 +1,8 @@
-import visa
+try:
+	import visa
+except:
+	Ask_For_Install( "PyVisa" )
+	import visa
 import matplotlib.pyplot as plt
 import numpy as np
 import time

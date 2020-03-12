@@ -27,6 +27,7 @@ class Current_State:
 class Temperature_Controller( QtCore.QObject ):
 	"""Interface with serial com port to control temperature"""
 	Temperature_Changed = QtCore.pyqtSignal(float)
+	Case_Temperature_Changed = QtCore.pyqtSignal(float)
 	PID_Output_Changed = QtCore.pyqtSignal(float)
 	Setpoint_Changed = QtCore.pyqtSignal(float)
 	Device_Connected = QtCore.pyqtSignal(str,str)
@@ -188,10 +189,13 @@ class Temperature_Controller( QtCore.QObject ):
 			if m.group( 1 ) == "Cold Junction ":
 				pass
 			elif m.group( 1 ) == "Thermocouple ":
-				pass
+				temp = float( m.group( 2 ) ) + 273.15
+				if( temp < 0 or temp > 1000 ):
+					return
+				self.Case_Temperature_Changed.emit( temp )
 			else: # RTD Sensor
 				temp = float( m.group( 2 ) ) + 273.15
-				print( "Reading Temperature = {}".format( temp ) )
+				#print( "Reading Temperature = {}".format( temp ) )
 				if( temp < 0 or temp > 1000 ):
 					return
 				self.current_temperature = temp

@@ -19,6 +19,21 @@ def Ask_Yes_Or_No_Popup( title_of_window, message ):
 
 	return answer_was_yes
 
+class NumpyMySQLConverter(mysql.connector.conversion.MySQLConverter):
+    """ A mysql.connector Converter that handles Numpy types """
+
+    def _float32_to_mysql(self, value):
+        return float(value)
+
+    def _float64_to_mysql(self, value):
+        return float(value)
+
+    def _int32_to_mysql(self, value):
+        return int(value)
+
+    def _int64_to_mysql(self, value):
+        return int(value)
+
 def Connect_To_SQL( configuration_file_path, config_error_popup=None ):
 	if config_error_popup == None:
 		config_error_popup = Ask_Yes_Or_No_Popup
@@ -33,6 +48,7 @@ def Connect_To_SQL( configuration_file_path, config_error_popup=None ):
 		elif db_type == "QMYSQL":
 			sql_conn = mysql.connector.connect( host=configuration_file['SQL_Server']['host_location'], database=db_name,
 								user=configuration_file['SQL_Server']['username'], password=configuration_file['SQL_Server']['password'] )
+			sql_conn.set_converter_class( NumpyMySQLConverter )
 			sql_conn.ping( True ) # Maintain connection to avoid timing out
 		return db_type, sql_conn
 
