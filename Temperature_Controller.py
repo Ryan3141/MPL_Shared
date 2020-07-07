@@ -189,8 +189,8 @@ class Temperature_Controller( QtCore.QObject ):
 			if m.group( 1 ) == "Cold Junction ":
 				pass
 			elif m.group( 1 ) == "Thermocouple ":
-				temp = float( m.group( 2 ) ) + 273.15
-				if( temp < 0 or temp > 1000 ):
+				temp = float( m.group( 2 ) )
+				if( temp < -273.15 or temp > 1000 ):
 					return
 				self.Case_Temperature_Changed.emit( temp )
 			else: # RTD Sensor
