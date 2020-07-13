@@ -87,7 +87,10 @@ def Commit_XY_Data_To_SQL( sql_type, sql_conn, xy_data_sql_table, xy_sql_labels,
 
 	cur = sql_conn.cursor()
 	cur.execute( get_measurement_id_string )
-	measurement_id = int( cur.fetchone()[0] ) + 1
+	try:
+		measurement_id = int( cur.fetchone()[0] ) + 1
+	except:
+		measurement_id = 0
 	cur.execute( meta_data_sql_string, [measurement_id] + list(commit_things.values()) )
 	data_as_tuple = tuple(zip([measurement_id] * len(x_data),(float(x) for x in x_data),(float(y) for y in y_data))) # mysql.connector requires a tuple or list (not generator) and native float type as input
 	cur.executemany( data_sql_string, data_as_tuple )
