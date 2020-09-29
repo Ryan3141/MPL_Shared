@@ -27,13 +27,7 @@ class IV_Controller( QtCore.QObject ):
 	def run(self):
 		self.resource_manager = visa.ResourceManager()
 		self.Initialize_Connection()
-		#while( True ):
-		#	#QtCore.QThread.yieldCurrentThread()
-		#	QtCore.QCoreApplication.processEvents()
-		#	time.sleep( 0.5 )
 
-		#	if self.Keithly == None:
-		#		continue
 
 	def Close_Connection():
 		self.Keithly.close()
@@ -49,6 +43,7 @@ class IV_Controller( QtCore.QObject ):
 		try:
 			self.Keithly = self.resource_manager.open_resource('GPIB::26::INSTR') # Keithly 236's address on GPIB connection with IEEE-446 protocol
 			self.ivControllerConnected_signal.emit()
+			self.Keithly.clear()
 			return self.Keithly
 		except:
 			return None
@@ -64,17 +59,8 @@ class IV_Controller( QtCore.QObject ):
 	def Voltage_Sweep( self, input_start, input_end, input_step ):
 		Keithly = self.Keithly
 		if Keithly == None:
-			x_values = np.arange( input_start, input_end + input_step, input_step )
-			self.newSweepStarted_signal.emit()
-			time.sleep( 0.1 )
-
-			for index, x in enumerate(x_values):
-				self.dataPointGotten_signal.emit( x, x * 100E-3 * self.debug )
-				time.sleep( 0.01 )
-			self.sweepFinished_signal.emit( x_values, x_values )
-			self.debug += 1
+			print( "Keithly not connected, cannot run voltage sweep" )
 			return
-		x_values = np.arange( input_start, input_end + input_step, input_step )
 		
 		Keithly = self.Keithly
 		self.newSweepStarted_signal.emit()
@@ -82,6 +68,7 @@ class IV_Controller( QtCore.QObject ):
 		Keithly.write( "F0,1X" ) # Source voltage (0), and measure dc current (0), then sweep (1) not dc (0)
 
 		Keithly.write( "P1X" ) # Take 2^1 = 32 readings each measurement
+		Keithly.write( "O1X" ) # Change to remote sensing (4 point probe)
 		Keithly.write( "L25E-3,0X" ) # Set compliance to 25 mA, range (0 for autorange)
 		Keithly.write( "S2X" ) # Integration time = 16.67 msec (for 60Hz power line)
 		Keithly.write( "R0X" ) # Disable Triggers
@@ -96,6 +83,7 @@ class IV_Controller( QtCore.QObject ):
 		Keithly.write( "H0X" ) # Send immediate trigger
 		Keithly.write( "G4,2,1X" ) # Set reading format to read raw results one by one
 		results = []
+		x_values = np.arange( int(input_start * 1E9), int(input_end * 1E9) + 1, int(input_step * 1E9) ) / 1E9
 		for index, x in enumerate(x_values):
 			data = Keithly.read()
 			#print( data )
@@ -112,22 +100,11 @@ class IV_Controller( QtCore.QObject ):
 		#Keithly.write( "B0.1,0,200X" ) # Set bias to 0.1 V, autorange the bias range, delay in milliseconds
 
 		#Keithly.write( "G4,2,2X" ) # Set the read to just spit out the raw current values (in A) when we call read, final 2 means give all lines of sweep data per talk
-		#Keithly.timeout = 120000 # The measurement may take up to 120 seconds
-		results = Keithly.query_ascii_values('G4,2,2X', container=np.array)
 		#results = Keithly.read()
-		#print( Keithly.read() + " Amps Read\n" )
-		#return_current_values = [float(x) for x in results.split(',')]
+		Keithly.timeout = 120000 # The measurement may take up to 120 seconds
+		results = Keithly.query_ascii_values('G4,2,2X', container=np.array)
 		self.sweepFinished_signal.emit( x_values, np.array(results) )
 
-		#	plots_so_far.append( (x_values, np.log10(np.abs(results)) ) )
-		#	with open( "IV Data " + timestr + ".csv", 'w' ) as outfile:
-		#		for index, p in enumerate( plots_so_far ):
-		#			plt.plot( *p, color=colors[index] )
-		#			outfile.write( ','.join([str(x) for x in p[0]]) + '\n' )
-		#			outfile.write( ','.join([str(x) for x in p[1]]) + '\n' )
-		##	plt.legend( True )
-		#	label += 1
-		#	plt.show()
 
 
 
