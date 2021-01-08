@@ -72,7 +72,7 @@ def Connect_To_SQL( configuration_file_path, config_error_popup=None ):
 def Commit_To_SQL( sql_type, sql_conn, sql_table, **commit_things ):
 	sql_insert_string = '''INSERT INTO {}({}) VALUES({})'''.format( sql_table, ','.join( commit_things.keys() ), ','.join( ['%s'] * len(commit_things.keys()) ) )
 	if sql_type == 'QSQLITE':
-		sql_insert_string.replace( '%s', '?' )
+		sql_insert_string = sql_insert_string.replace( '''%s''', '?' )
 
 	cur = sql_conn.cursor()
 	cur.execute( sql_insert_string, list(commit_things.values()) )
@@ -83,7 +83,8 @@ def Commit_XY_Data_To_SQL( sql_type, sql_conn, xy_data_sql_table, xy_sql_labels,
 	meta_data_sql_string = '''INSERT INTO {}(measurement_id,{}) VALUES({})'''.format( metadata_sql_table, ','.join( commit_things.keys() ), ','.join( ['%s'] * (1 + len(commit_things.keys())) ) )
 	data_sql_string = '''INSERT INTO {}(measurement_id,{}) VALUES(%s,%s,%s)'''.format( xy_data_sql_table, ','.join( xy_sql_labels ) )
 	if sql_type == 'QSQLITE':
-		sql_insert_string.replace( '%s', '?' )
+		meta_data_sql_string = meta_data_sql_string.replace( '''%s''', '?' )
+		data_sql_string = data_sql_string.replace( '''%s''', '?' )
 
 	cur = sql_conn.cursor()
 	cur.execute( get_measurement_id_string )

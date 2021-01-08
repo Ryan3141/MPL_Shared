@@ -21,7 +21,8 @@ class Current_State:
 		self.pid_is_on = False
 		self.set_temperature = 0
 		self.pads_selected = (1, 2)
-		self.pid_settings = [1000, 50, 0] # Directly on copper pad
+		self.pid_settings = [250.0, 1.0, 0.1] # With 24V supply and still LN2
+		# self.pid_settings = [10.0, 2.0, 0.5] # Directly on copper pad
 		#self.pid_settings = [20, 2, 0] # On PCB
 
 class Temperature_Controller( QtCore.QObject ):

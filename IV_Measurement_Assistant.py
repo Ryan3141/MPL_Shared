@@ -62,12 +62,13 @@ class IV_Controller( QtCore.QObject ):
 			print( "Keithly not connected, cannot run voltage sweep" )
 			return
 		
+		time.sleep( 2 ) # Sleep to make sure heater has time to turn off
 		Keithly = self.Keithly
 		self.newSweepStarted_signal.emit()
 		Keithly.write( "J0X" ) # Reset everything to known good state (factory defaults)
 		Keithly.write( "F0,1X" ) # Source voltage (0), and measure dc current (0), then sweep (1) not dc (0)
 
-		Keithly.write( "P1X" ) # Take 2^1 = 32 readings each measurement
+		Keithly.write( "P5X" ) # Take 2^5 = 32 readings each measurement
 		Keithly.write( "O1X" ) # Change to remote sensing (4 point probe)
 		Keithly.write( "L25E-3,0X" ) # Set compliance to 25 mA, range (0 for autorange)
 		Keithly.write( "S2X" ) # Integration time = 16.67 msec (for 60Hz power line)
@@ -75,8 +76,13 @@ class IV_Controller( QtCore.QObject ):
 		Keithly.write( "T4,0,0,0X" ) # Set triggering after H0X command and continue immediately
 		Keithly.write( "R1X" ) # Enable Triggers
 
-		Keithly.write( "Q1,{},{},{},0,10X".format( input_start, input_end, input_step ) ) # Linear stair step voltage (1), start, stop, step, range (0 for autorange), delay
-
+		initial_delay_ms = 200
+		delay_ms = 10
+		v_range = 1
+		# Keithly.write( f"Q0,{input_start},{v_range},{initial_delay_ms},1X" ) # Hold first voltage for 1 count
+		Keithly.write( f"Q1,{input_start},{input_end},{input_step},{v_range},{delay_ms}X" ) # Linear stair step voltage (1), start, stop, step, range (1 for 1V range, 0 for autorange), delay
+		# Keithly.write( f"Q0,{input_end},{v_range},{initial_delay_ms},1X" ) # Hold first voltage for 1 count
+	
 		#timestr = time.strftime("%Y%m%d-%H%M%S")
 
 		Keithly.write( "N1X" ) # Set machine to active mode
