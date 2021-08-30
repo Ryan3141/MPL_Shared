@@ -1,7 +1,7 @@
 from .Install_If_Necessary import Ask_For_Install
 try:
 	import serial
-except:
+except ImportError:
 	Ask_For_Install( "PySerial" )
 	import serial
 
@@ -21,7 +21,7 @@ class Current_State:
 		self.pid_is_on = False
 		self.set_temperature = 0
 		self.pads_selected = (1, 2)
-		self.pid_settings = [250.0, 1.0, 0.1] # With 24V supply and still LN2
+		self.pid_settings = [500.0, 10.0, 0.1] # With 24V supply and still LN2
 		# self.pid_settings = [10.0, 2.0, 0.5] # Directly on copper pad
 		#self.pid_settings = [20, 2, 0] # On PCB
 
@@ -75,7 +75,7 @@ class Temperature_Controller( QtCore.QObject ):
 		self.setpoint_temperature = None
 		self.partial_serial_message = ""
 		self.past_temperatures = []
-		self.stable_temperature_sample_count = 100
+		self.stable_temperature_sample_count = 120#480 # 4 minutes
 
 		# Continuously recheck temperature controller
 		self.connection_timeout_timer = QtCore.QTimer( self )
@@ -83,7 +83,7 @@ class Temperature_Controller( QtCore.QObject ):
 		self.connection_timeout_timer.start( self.connection_timeout )
 
 
-		
+
 	def Share_Current_State( self ):
 		self.Set_Temperature_In_K( self.status.set_temperature )
 		self.Set_PID( *self.status.pid_settings )
@@ -115,7 +115,7 @@ class Temperature_Controller( QtCore.QObject ):
 				self.serial_connection = serial.Serial(port, 115200, timeout=0)
 				self.serial_port = port
 				return True
-			except:
+			except Exception:
 				pass
 
 		return False

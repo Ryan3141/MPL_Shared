@@ -5,7 +5,7 @@ def Get_Device_Description_File( file_path ):
 	config_info = {}
 	try:
 		csvfile = open( file_path )
-	except:
+	except Exception:
 		return None
 	spamreader = csv.reader( csvfile, delimiter=',' )
 	labels = next( spamreader )
