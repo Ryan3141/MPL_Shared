@@ -48,7 +48,7 @@ class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWin
 			#self.kp_lineEdit.setStyleSheet( yellow_background_text )
 			#self.ki_lineEdit.setStyleSheet( yellow_background_text )
 			#self.kd_lineEdit.setStyleSheet( yellow_background_text )
-		except:
+		except Exception:
 			pass
 
 	def Send_New_Selected_Pads( self ):
@@ -59,7 +59,7 @@ class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWin
 			#temp_controller.Set_Active_Pads( pad1, pad2 )
 			#self.pad1_lineEdit.setStyleSheet( yellow_background_text )
 			#self.pad2_lineEdit.setStyleSheet( yellow_background_text )
-		except:
+		except Exception:
 			self.Pads_Selected_Error()
 
 	def PID_Coefficients_Updated( self, pid_coefficients ):

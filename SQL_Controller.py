@@ -2,7 +2,7 @@ from .Install_If_Necessary import Ask_For_Install
 
 try:
 	import mysql.connector
-except:
+except ImportError:
 	Ask_For_Install( "mysql-connector-python" )
 	import mysql.connector
 
@@ -90,10 +90,30 @@ def Commit_XY_Data_To_SQL( sql_type, sql_conn, xy_data_sql_table, xy_sql_labels,
 	cur.execute( get_measurement_id_string )
 	try:
 		measurement_id = int( cur.fetchone()[0] ) + 1
-	except:
+	except Exception:
 		measurement_id = 0
 	cur.execute( meta_data_sql_string, [measurement_id] + list(commit_things.values()) )
 	data_as_tuple = tuple(zip([measurement_id] * len(x_data),(float(x) for x in x_data),(float(y) for y in y_data))) # mysql.connector requires a tuple or list (not generator) and native float type as input
 	cur.executemany( data_sql_string, data_as_tuple )
 	sql_conn.commit()
 
+#def Create_Table_If_Needed( sql_conn, sql_type ):
+#	cur = sql_conn.cursor()
+#	try:
+#		if sql_type == "QSQLITE":
+#			cur.execute("""CREATE TABLE `ftir_measurements` ( `sample_name`	TEXT NOT NULL, `time`	DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `measurement_id`	TEXT NOT NULL, `temperature_in_k`	REAL, `bias_in_v`	REAL, `user`	TEXT, `detector`	TEXT, `beam_splitter`	TEXT, `start_wave_number`	REAL, `end_wave_number`	REAL, `number_of_scans`	INTEGER, `velocity`	REAL, `aperture`	REAL, `gain`	REAL );""")
+#		else:
+#			cur.execute("""CREATE TABLE `ftir_measurements` ( `sample_name`	TEXT NOT NULL, `time`	DATETIME NOT NULL, `measurement_id`	TEXT NOT NULL, `temperature_in_k`	REAL, `bias_in_v`	REAL, `user`	TEXT, `detector`	TEXT, `beam_splitter`	TEXT, `start_wave_number`	REAL, `end_wave_number`	REAL, `number_of_scans`	INTEGER, `velocity`	REAL, `aperture`	REAL, `gain`	REAL );""")
+#	except (mysql.connector.Error, mysql.connector.Warning) as e:
+#		pass
+#		#print(e)
+#	except:
+#		pass # Will cause exception if they already exist, but that's fine since we are just trying to make sure they exist
+
+#	try:
+#		cur.execute("""CREATE TABLE `raw_ftir_data` ( `measurement_id` TEXT NOT NULL, `wavenumber` REAL NOT NULL, `intensity` REAL NOT NULL );""")
+#	except:
+#		pass # Will cause exception if they already exist, but that's fine since we are just trying to make sure they exist
+
+#	cur.close()
+#	return False

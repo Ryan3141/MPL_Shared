@@ -145,7 +145,7 @@ class Device_Communicator( QtCore.QObject ):
 						continue
 					else:
 						match = re.match( line.decode() );
-				except:
+				except Exception:
 					continue
 				if not match.hasMatch():
 					pure_text_messages.append( line )

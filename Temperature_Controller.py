@@ -1,7 +1,7 @@
 from .Install_If_Necessary import Ask_For_Install
 try:
 	import serial
-except:
+except ImportError:
 	Ask_For_Install( "PySerial" )
 	import serial
 
@@ -21,7 +21,7 @@ class Current_State:
 		self.pid_is_on = False
 		self.set_temperature = 0
 		self.pads_selected = (1, 2)
-		self.pid_settings = [250.0, 1.0, 0.1] # With 24V supply and still LN2
+		self.pid_settings = [500.0, 10.0, 0.1] # With 24V supply and still LN2
 		# self.pid_settings = [10.0, 2.0, 0.5] # Directly on copper pad
 		#self.pid_settings = [20, 2, 0] # On PCB
 
@@ -37,6 +37,8 @@ class Temperature_Controller( QtCore.QObject ):
 	Pads_Selected_Changed = QtCore.pyqtSignal(tuple, bool) # Pads actually connected, were they connected in reverse order
 	Pads_Selected_Invalid = QtCore.pyqtSignal()
 	Temperature_Stable = QtCore.pyqtSignal()
+	Heater_Output_On = QtCore.pyqtSignal()
+	Heater_Output_Off = QtCore.pyqtSignal()
 
 	def __init__( self, configuration_file, parent=None, connection_timeout=1000 ):
 		super().__init__( parent )
@@ -75,7 +77,7 @@ class Temperature_Controller( QtCore.QObject ):
 		self.setpoint_temperature = None
 		self.partial_serial_message = ""
 		self.past_temperatures = []
-		self.stable_temperature_sample_count = 100
+		self.stable_temperature_sample_count = 20#120#480 # 4 minutes
 
 		# Continuously recheck temperature controller
 		self.connection_timeout_timer = QtCore.QTimer( self )
@@ -83,7 +85,7 @@ class Temperature_Controller( QtCore.QObject ):
 		self.connection_timeout_timer.start( self.connection_timeout )
 
 
-		
+
 	def Share_Current_State( self ):
 		self.Set_Temperature_In_K( self.status.set_temperature )
 		self.Set_PID( *self.status.pid_settings )
@@ -115,7 +117,7 @@ class Temperature_Controller( QtCore.QObject ):
 				self.serial_connection = serial.Serial(port, 115200, timeout=0)
 				self.serial_port = port
 				return True
-			except:
+			except Exception:
 				pass
 
 		return False
@@ -160,16 +162,17 @@ class Temperature_Controller( QtCore.QObject ):
 
 	def Turn_On( self ):
 		self.status.pid_is_on = True
-		print( "Turning PID On" )
+		print( "Turning heater On" )
 		message = ("turn on;\n")
 		if self.serial_connection is not None:
 			self.serial_connection.write( message.encode() )
 
 		self.device_communicator.Send_Command( message )
+		self.triggered_temp_stable_already = False
 
 	def Turn_Off( self ):
 		self.status.pid_is_on = False
-		print( "Turning PID Off" )
+		print( "Turning heater off" )
 		message = ("turn off;\n")
 		if self.serial_connection is not None:
 			self.serial_connection.write( message.encode() )
@@ -243,7 +246,10 @@ class Temperature_Controller( QtCore.QObject ):
 		if( message.find( self.identifier_string ) != -1 ):
 			self.Device_Connected.emit( str(self.serial_port), "Serial" )
 
+		if( message.find( "Turning output on" ) != -1 ):
+			self.Heater_Output_On.emit()
 		if( message.find( "Turning output off" ) != -1 ):
+			self.Heater_Output_Off.emit()
 			self.Setpoint_Changed.emit( 0.0 )
 		#else:
 		#	print( message )
