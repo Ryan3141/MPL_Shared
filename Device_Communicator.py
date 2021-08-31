@@ -43,6 +43,20 @@ class Device_Communicator( QtCore.QObject ):
 			else:
 				raise Exception( "Failed to listen on ip " + listener_address.toString() )
 
+	def Stop( self ):
+		# Stop timers as quickly as possible
+		self.timer.stop()
+		copy_of_list = [x for x in self.active_connections.values()]
+		for device in copy_of_list:
+			device.timer.stop()
+
+		# Then disconnect all active network connections
+		try: self.tcp_server.destroyed.disconnect()
+		except Exception: pass
+		self.udp_socket.close()
+		for device in copy_of_list:
+			device.pSocket.close()
+		self.tcp_server.close()
 
 	def No_Devices_Connected( self ):
 		return not self.active_connections
@@ -86,9 +100,9 @@ class Device_Communicator( QtCore.QObject ):
 		self.tcp_server.newConnection.connect( self.Handle_New_Connection )
 
 		# Ping connections to test for them disconnecting unexpectedly
-		timer = QtCore.QTimer( self )
-		timer.timeout.connect( lambda : self.Send_Command( "PING;\n" ) )
-		timer.start( 5000 )
+		self.timer = QtCore.QTimer( self )
+		self.timer.timeout.connect( lambda : self.Send_Command( "PING;\n" ) )
+		self.timer.start( 5000 )
 
 		return True
 
@@ -114,7 +128,7 @@ class Device_Communicator( QtCore.QObject ):
 
 	def Socket_Disconnected( self, peer_identifier, reasoning ):
 		if peer_identifier in self.active_connections.keys():
-			print( self.active_connections.keys() )
+			# print( self.active_connections.keys() )
 			socket_to_close = self.active_connections[ peer_identifier ].pSocket
 			del self.active_connections[ peer_identifier ]
 			socket_to_close.close() # this line calls Socket_Disconnected again, so must delete key first to avoid double calling

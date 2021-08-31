@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 def install(package):
-    subprocess.call([sys.executable, "-m", "pip", "install", package])
+    subprocess.call([sys.executable, "-m", "pip", "install", "--user", package])
 
 def Ask_For_Install( package_name ):
 	root = Tk()

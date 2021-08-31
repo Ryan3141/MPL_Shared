@@ -84,7 +84,9 @@ class Temperature_Controller( QtCore.QObject ):
 		self.connection_timeout_timer.timeout.connect( self.Update )
 		self.connection_timeout_timer.start( self.connection_timeout )
 
-
+	def thread_stop( self ):
+		self.connection_timeout_timer.stop()
+		self.device_communicator.Stop()
 
 	def Share_Current_State( self ):
 		self.Set_Temperature_In_K( self.status.set_temperature )
