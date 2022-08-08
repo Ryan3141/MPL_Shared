@@ -2,24 +2,27 @@ from PyQt5 import QtNetwork, QtCore, QtGui, uic, QtWidgets
 
 import os
 
-base_path = os.path.dirname( os.path.realpath(__file__) )
+from .GUI_Tools import resource_path
 
-def resource_path(relative_path):  # Define function to import external files when using PyInstaller.
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    return os.path.join(base_path, relative_path)
 
 qtConfigurationUIFile = resource_path( "Temperature_Controller_Settings.ui" ) # GUI layout file.
 Ui_ConfigurationWindow, QtBaseClass2 = uic.loadUiType(qtConfigurationUIFile)
 yellow_background_text = "QLineEdit { background-color: rgba(255,255,0,255); color: rgba(0, 0, 0,255); }"
 green_background_text = "QLineEdit { background-color: rgba(0,255,0,255); color: rgba(0, 0, 0,255); }"
+yellow_background_text_button = "QPushButton { background-color: rgba(255,255,0,255); color: rgba(0, 0, 0,255); }"
+green_background_text_button = "QPushButton { background-color: rgba(0,255,0,255); color: rgba(0, 0, 0,255); }"
 class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWindow):
 	Temperature_Change_Requested = QtCore.pyqtSignal(float, float, float) # kp, ki, kd
-	Pad_Change_Requested = QtCore.pyqtSignal(int, int) # kp, ki, kd
+	Pad_Change_Requested = QtCore.pyqtSignal(int, int)
+	Transimpedance_Change_Requested = QtCore.pyqtSignal(int)
 
 	def __init__(self, parent=None):
 		QtWidgets.QWidget.__init__(self, parent)
 		Ui_ConfigurationWindow.__init__(self)
 		self.setupUi(self)
+
+		self.transimpedance_buttons = [self.transimpedanceGainOff_pushButton, self.transimpedanceGain100_pushButton, self.transimpedanceGain1000_pushButton, self.transimpedanceGain10000_pushButton, self.transimpedanceGain100000_pushButton]
+		self.transimpedance_settings = [0, 100, 1000, 10000, 100000]
 
 	def Connect_Functions( self, temp_controller ):
 		self.kp_lineEdit.returnPressed.connect( self.Send_New_PID_Coefficients )
@@ -30,6 +33,14 @@ class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWin
 		self.kd_lineEdit.textChanged.connect( lambda : self.kd_lineEdit.setStyleSheet( yellow_background_text ) )
 		self.pad1_lineEdit.textChanged.connect( lambda : self.pad1_lineEdit.setStyleSheet( yellow_background_text ) )
 		self.pad2_lineEdit.textChanged.connect( lambda : self.pad2_lineEdit.setStyleSheet( yellow_background_text ) )
+		self.pad1_lineEdit.returnPressed.connect( self.Send_New_Selected_Pads )
+		self.pad2_lineEdit.returnPressed.connect( self.Send_New_Selected_Pads )
+
+		for gain, button in zip( self.transimpedance_settings, self.transimpedance_buttons ):
+			button.clicked.connect( lambda *args, gain=gain : self.Transimpedance_Change_Requested.emit( gain ) )
+			button.clicked.connect( lambda : [x.setStyleSheet( yellow_background_text_button ) for x in self.transimpedance_buttons ] )
+		self.Transimpedance_Change_Requested.connect( temp_controller.Set_Transimpedance_Gain )
+		temp_controller.Transimpedance_Gain_Changed.connect( self.Transimpedance_Selected )
 
 		self.Temperature_Change_Requested.connect( temp_controller.Set_PID )
 		self.Pad_Change_Requested.connect( temp_controller.Set_Active_Pads )
@@ -37,6 +48,13 @@ class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWin
 		temp_controller.PID_Coefficients_Changed.connect( self.PID_Coefficients_Updated )
 		temp_controller.Pads_Selected_Changed.connect( self.Pads_Selected_Updated )
 		temp_controller.Pads_Selected_Invalid.connect( self.Pads_Selected_Error )
+
+	def Transimpedance_Selected( self, gain ):
+		for setting, button in zip( self.transimpedance_settings, self.transimpedance_buttons ):
+			if setting == gain:
+				button.setStyleSheet( green_background_text_button )
+			else:
+				button.setStyleSheet( yellow_background_text_button )
 
 	def Send_New_PID_Coefficients( self ):
 		try:

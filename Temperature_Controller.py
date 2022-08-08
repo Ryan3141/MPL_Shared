@@ -11,6 +11,8 @@ import sys
 import configparser
 import numpy as np
 from time import sleep
+from collections import deque
+from rich import print
 
 from PyQt5 import QtCore
 
@@ -36,9 +38,10 @@ class Temperature_Controller( QtCore.QObject ):
 	PID_Coefficients_Changed = QtCore.pyqtSignal(tuple) # Kp, Ki, Kd actually set
 	Pads_Selected_Changed = QtCore.pyqtSignal(tuple, bool) # Pads actually connected, were they connected in reverse order
 	Pads_Selected_Invalid = QtCore.pyqtSignal()
-	Temperature_Stable = QtCore.pyqtSignal()
+	Temperature_Stable = QtCore.pyqtSignal(float)
 	Heater_Output_On = QtCore.pyqtSignal()
 	Heater_Output_Off = QtCore.pyqtSignal()
+	Transimpedance_Gain_Changed = QtCore.pyqtSignal( int )
 
 	def __init__( self, configuration_file, parent=None, connection_timeout=1000 ):
 		super().__init__( parent )
@@ -46,6 +49,7 @@ class Temperature_Controller( QtCore.QObject ):
 		self.configuration_file = configuration_file
 		self.connection_timeout = connection_timeout
 		self.triggered_temp_stable_already = False
+		self.case_temperature = None
 
 	def thread_start( self ):
 		config = configparser.ConfigParser()
@@ -61,8 +65,8 @@ class Temperature_Controller( QtCore.QObject ):
 			self.device_communicator.Poll_LocalIPs_For_Devices( config['Temperature_Controller']['ip_range'] )
 			success = True
 			self.device_communicator.Reply_Recieved.connect( lambda message, device : self.ParseMessage( message ) )
-			self.device_communicator.Device_Connected.connect( lambda peer_identifier : self.Device_Connected.emit( peer_identifier, "Wifi" ) )
-			self.device_communicator.Device_Disconnected.connect( lambda peer_identifier : self.Device_Disconnected.emit( peer_identifier, "Wifi" ) )
+			self.device_communicator.Device_Connected.connect( lambda peer_identifier : self.Device_Connected.emit( peer_identifier, "Temp Controller" ) )
+			self.device_communicator.Device_Disconnected.connect( lambda peer_identifier : self.Device_Disconnected.emit( peer_identifier, "Temp Controller" ) )
 
 			self.device_communicator.Device_Connected.connect( lambda peer_identifier : self.Share_Current_State() )
 
@@ -76,8 +80,9 @@ class Temperature_Controller( QtCore.QObject ):
 		self.current_temperature = None
 		self.setpoint_temperature = None
 		self.partial_serial_message = ""
-		self.past_temperatures = []
-		self.stable_temperature_sample_count = 20#120#480 # 4 minutes
+		self.stable_temperature_sample_count = 120#480 # 4 minutes
+		self.past_temperatures = deque( maxlen=self.stable_temperature_sample_count )
+		self.past_heater_output = deque( maxlen=self.stable_temperature_sample_count )
 
 		# Continuously recheck temperature controller
 		self.connection_timeout_timer = QtCore.QTimer( self )
@@ -87,6 +92,9 @@ class Temperature_Controller( QtCore.QObject ):
 	def thread_stop( self ):
 		self.connection_timeout_timer.stop()
 		self.device_communicator.Stop()
+
+	def Make_Safe( self ):
+		self.Turn_Off()
 
 	def Share_Current_State( self ):
 		self.Set_Temperature_In_K( self.status.set_temperature )
@@ -198,6 +206,7 @@ class Temperature_Controller( QtCore.QObject ):
 				temp = float( m.group( 2 ) )
 				if( temp < -273.15 or temp > 1000 ):
 					return
+				self.case_temperature = temp
 				self.Case_Temperature_Changed.emit( temp )
 			else: # RTD Sensor
 				temp = float( m.group( 2 ) ) + 273.15
@@ -206,16 +215,22 @@ class Temperature_Controller( QtCore.QObject ):
 					return
 				self.current_temperature = temp
 				self.Temperature_Changed.emit( self.current_temperature )
-
-				if( self.Check_If_Temperature_Is_Stable( self.current_temperature ) and not self.triggered_temp_stable_already ):
+				temp_is_stable, out_of_nitrogen, last_temperature = self.Check_If_Temperature_Is_Stable( self.current_temperature )
+				if( temp_is_stable and not self.triggered_temp_stable_already ):
 					self.triggered_temp_stable_already = True
-					print( "Temperature stable around: " + str(self.setpoint_temperature) + '\n' )
-					self.Temperature_Stable.emit()
+					# if out_of_nitrogen:
+					# 	print( f"Probably out of nitrogen, running at {round(last_temperature, 2)} intended at {round(self.setpoint_temperature, 2)}")
+					# 	self.Set_PID( 0, 0, 0 )
+					# 	self.Temperature_Stable.emit( round(last_temperature, 2) )
+					# else:
+					print( f"Temperature stable around: {round(self.setpoint_temperature, 2)}" )
+					self.Temperature_Stable.emit( round(self.current_temperature, 2) )
 
 		pid_output_pattern = re.compile( 'PID Output:\s*({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
 		m2 = pid_output_pattern.search( message )
 		if( m2 ):
 			output_pid = float( m2.group( 1 ) )
+			self.past_heater_output.append( output_pid )
 			self.PID_Output_Changed.emit( output_pid )
 
 		setpoint_pattern = re.compile( 'Setpoint:\s*({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
@@ -235,6 +250,7 @@ class Temperature_Controller( QtCore.QObject ):
 		if( m5 ):
 			pads_connected = tuple( int( m5.group(i) ) for i in range(1, 3) )
 			if m5.group(3) == " reversed":
+				print( "Pads reversed" )
 				is_reversed = True
 			else:
 				is_reversed = False
@@ -253,8 +269,14 @@ class Temperature_Controller( QtCore.QObject ):
 		if( message.find( "Turning output off" ) != -1 ):
 			self.Heater_Output_Off.emit()
 			self.Setpoint_Changed.emit( 0.0 )
-		#else:
-		#	print( message )
+
+		transimpedance_changed_pattern = re.compile( 'Transimpedance gain set to (\d+)' )
+		m6 = transimpedance_changed_pattern.search( message )
+		if( m6 ):
+			self.Transimpedance_Gain_Changed.emit( int(m6.group(1)) )
+		if( message.find( "Transimpedance mode off" ) != -1 ):
+			self.Transimpedance_Gain_Changed.emit( 0 )
+
 
 	def Set_Temp_And_Turn_On( self, temperature_in_k ):
 		if temperature_in_k is None:
@@ -264,22 +286,39 @@ class Temperature_Controller( QtCore.QObject ):
 
 	def Check_If_Temperature_Is_Stable( self, new_temperature_in_k ):
 		self.past_temperatures.append( new_temperature_in_k )
-		if( len(self.past_temperatures) > self.stable_temperature_sample_count ):
-			self.past_temperatures = self.past_temperatures[-self.stable_temperature_sample_count:]
 
 		if( len(self.past_temperatures) < self.stable_temperature_sample_count ):
-			return False
-		error = np.array( self.past_temperatures ) - self.setpoint_temperature
-		if np.amax( np.fabs( error ) ) > 1:
-			return False
+			return False, False, new_temperature_in_k
+
+		heater_not_on_in_a_while = np.average( np.array( self.past_heater_output ) ) < 0.5
+		temps_as_array = np.array( self.past_temperatures )
+		error = temps_as_array - self.setpoint_temperature
+		change_over_time = temps_as_array[len(temps_as_array) // 2:] - temps_as_array[:-len(temps_as_array) // 2]
+		temp_keeps_going_up = np.average( change_over_time > 0 ) > 0.8 # If it's increasing more than 80 % of the time
+		probably_out_of_nitrogen = temp_keeps_going_up and heater_not_on_in_a_while and new_temperature_in_k > self.setpoint_temperature
+		if np.amax( np.fabs( error ) ) <= 1 or probably_out_of_nitrogen:
+			temp_is_stable = True
 		else:
-			return True
+			temp_is_stable = False
+
+		return temp_is_stable, probably_out_of_nitrogen, new_temperature_in_k
 #		deviation = np.std( error )
 #		average_error = np.mean( error )
 #		if( abs(average_error) < .5 and deviation < 0.2 ):
 #			return True
 #		else:
 #			return False
+
+	def Set_Transimpedance_Gain( self, gain ):
+		if gain == 0:
+			message = "set ti off;\n"
+		else:
+			message = "set ti gain " + str(gain) + ";\n"
+
+		if self.serial_connection is not None:
+			self.serial_connection.write( message.encode() )
+
+		self.device_communicator.Send_Command( message )
 
 # Function from: https://stackoverflow.com/questions/12090503/listing-available-com-ports-with-python/14224477#14224477
 def GetAvailablePorts():

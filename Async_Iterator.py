@@ -23,21 +23,17 @@ class Run_Async( QtCore.QObject ):
 
 
 class Async_Iterator( QtCore.QObject ):
-	def __init__( self, values_to_run, context, requests_to_prepare, inform_its_ready, quit_early ):#, call_this_on_finish = lambda value_run : None ):
+	def __init__( self, values_to_run, context, requests_to_prepare, inform_its_ready, should_quit_early ):#, call_this_on_finish = lambda value_run : None ):
 		QtCore.QObject.__init__(self)
 		self.should_quit_early = False
 		self.values_to_run = values_to_run
 		self.request = Run_Async( context, requests_to_prepare )
 		self.inform_its_ready = inform_its_ready
-		quit_early.connect( self.Quit_Early )
+		self.should_quit_early = should_quit_early
 
 	def Results_In( self, *results ):
 		self.results = results
 		self.finished_once = True
-
-	def Quit_Early( self, *args ):
-		# print( "Quit Early" )
-		self.should_quit_early = True
 
 	def __iter__( self ):
 		self.loop_instance = self.loop()
@@ -50,7 +46,7 @@ class Async_Iterator( QtCore.QObject ):
 
 	def loop( self ):
 		for value in self.values_to_run:
-			if self.should_quit_early:
+			if self.should_quit_early.is_set():
 				return
 			self.inform_its_ready.connect( self.Results_In )
 			self.request.Run( value )
@@ -58,13 +54,19 @@ class Async_Iterator( QtCore.QObject ):
 			while self.finished_once == False:
 				time.sleep( 1 )
 				QtCore.QCoreApplication.processEvents()
-				if self.should_quit_early:
+				if self.should_quit_early.is_set():
 					return
 			self.inform_its_ready.disconnect( self.Results_In )
 			self.finished_once = False
 			if value is None:
-				yield self.results
+				if len( self.results ) == 1:
+					yield self.results[ 0 ]
+				else:
+					yield self.results
 			elif len( self.results ) == 0:
 				yield value
 			else:
-				yield value, self.results
+				if len( self.results ) == 1:
+					yield value, self.results[ 0 ]
+				else:
+					yield value, self.results
