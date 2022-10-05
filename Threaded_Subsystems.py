@@ -45,7 +45,7 @@ class Threaded_Subsystems:
 			t.start()
 
 	def closeEvent( self, event ):
-		# self.Make_Safe()
+		self.Make_Safe()
 		for thread in self.subsystem_threads:
 			thread.quit()
 		for thread in self.subsystem_threads:

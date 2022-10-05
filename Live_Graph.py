@@ -16,6 +16,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import matplotlib.animation as animation
 
 import numpy as np
+import time
 
 import matplotlib.cm as cm
 
@@ -23,8 +24,6 @@ class Live_Graph( QWidget ):
 	def __init__(self, parent=None):
 		super().__init__(parent=parent)
 
-		self.current_graph_data = []
-		self.current_graph = None
 		#self.graph_colors = cm.get_cmap('seismic')(np.linspace(0, 1, 10))
 		self.graph_colors = cm.rainbow(np.linspace(0, 1, 10))
 		# a figure instance to plot on
@@ -47,11 +46,6 @@ class Live_Graph( QWidget ):
 		self.ax.grid(which='both')
 		self.ax.grid(which='minor', alpha=0.2, linestyle='--')
 		self.figure.tight_layout()
-		#self.ax.plot( [1,2,3,4], [1,2,3,4], 'b-')
-		self.all_graphs = []
-		self.debug_counter = 0
-		#self.current_graph, = self.ax.plot( [], [], 'b-')
-		#self.canvas.show()
 
 	def set_labels( self, title, x_label, y_label ):
 		self.ax.set_xlabel( x_label )
@@ -64,36 +58,30 @@ class Live_Graph( QWidget ):
 		needs_reload = True
 		del self.figure
 
-	def new_plot( self ):
-		#cm.get_cmap('seismic')(np.linspace(0, 1, 6)
-		self.current_graph, = self.ax.plot( [], [], color=self.graph_colors[self.debug_counter])
-		self.running_graph, = self.ax.plot( [], [], 'ro-' )
-		self.debug_counter = (self.debug_counter + 1) % 10
-		self.all_graphs.append( self.current_graph )
-		#self.ax.set_xlim([50,100])
-		self.current_graph_data = []
-		self.newest_data = None
-		self.ani = animation.FuncAnimation(self.figure, self.replot, blit=False, interval=10,
-                              repeat=True)
+	def prepare_blit_box( self ):
+		self.canvas.draw()
+		self.canvas.show()
+		self.figure.canvas.flush_events()
+		self.background = self.figure.canvas.copy_from_bbox(self.figure.bbox)
 
-	def replot( self, frame_number ):
-		if self.figure == None:
-			return
-		if len( self.current_graph_data ) > 0:
-			self.current_graph.set_data( *zip(*self.current_graph_data) )
-
-		if self.newest_data is not None:
-			self.running_graph.set_data( [self.newest_data[0]], [self.newest_data[1]] )
-		# refresh canvas
-		self.ax.relim()
-		#self.ax.autoscale_view()
-		#self.ax.autoscale(enable=True, axis='y')
-		self.ax.autoscale_view(True,True,True)
-		self.figure.tight_layout()
-		#plt.pause(0.05)
-		#self.canvas.draw()
-		#self.canvas.show()
-		return self.all_graphs + [self.running_graph]
+	def start_live_updates( self, list_of_graphs, update_interval_ms=20 ):
+		# self.canvas.draw()
+		# self.canvas.show()
+		# self.figure.canvas.flush_events()
+		# time.sleep( 0.5 )
+		# plt.pause( 0.1 )
+		# self.figure.canvas.pause(0.1) # Spin the event loop to let the backend process any pending operations
+		# self.background = self.figure.canvas.copy_from_bbox(self.figure.bbox)
+		def redraw_graphs():
+			# reload_data_function()
+			self.figure.canvas.restore_region( self.background )
+			for graph in list_of_graphs:
+				self.ax.draw_artist( graph )
+			self.figure.canvas.blit( self.figure.bbox )
+			self.figure.canvas.flush_events()
+		# self.ani = animation.FuncAnimation(self.figure, run_func_return_graphs, blit=True, interval=update_interval_ms,
+		#                       repeat=True)
+		return redraw_graphs
 
 	def add_new_data_point( self, x, y ):
 		self.newest_data = (x,y)

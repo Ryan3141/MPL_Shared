@@ -7,6 +7,10 @@ import os
 import inspect
 
 
+def debug_print( *args, **kargs ):
+	if False: # Whether or not it's debugging
+		print( *args, **kargs )
+
 def Popup_Error( title, message ):
 	error = QtWidgets.QMessageBox()
 	error.setIcon( QtWidgets.QMessageBox.Critical )

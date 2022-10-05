@@ -2,6 +2,10 @@ import time
 
 from PyQt5 import QtCore
 from itertools import product
+from threading import Event
+
+class Quitting_Early_Exception( Exception ):
+	pass
 
 class Run_Async( QtCore.QObject ):
 	RunRequest_signal = QtCore.pyqtSignal( object, object )
@@ -21,6 +25,73 @@ class Run_Async( QtCore.QObject ):
 		# print( "Async_Run Thread:", QtCore.QThread.currentThread() )
 		self.function_to_run( *args, **kargs )
 
+class Run_Async2( QtCore.QObject ):
+	RunRequest_signal = QtCore.pyqtSignal( object, object )
+	ResultsAcquired_signal = QtCore.pyqtSignal( object )
+	def __init__( self, context, function_to_run, quit_early_flag ):
+		QtCore.QObject.__init__( self )
+		self.quit_early = quit_early_flag
+		self.awaiting_results = True
+		self.function_to_run = function_to_run
+		self.ResultsAcquired_signal.connect( self.Results_Obtained )
+		self.moveToThread( context.thread() )
+		self.RunRequest_signal.connect( self._Async_Run )
+
+	def Results_Obtained( self, results ): # Run on calling thread
+		self.results = results
+		self.awaiting_results = False
+
+	def Run( self, *args, **kargs ): # Run on calling thread
+		# print( "Run Thread:", QtCore.QThread.currentThread() )
+		# print( f"args={args} kargs={kargs}")
+		self.RunRequest_signal.emit( args, kargs )
+		while( self.awaiting_results ):
+			if self.quit_early.is_set():
+				raise Quitting_Early_Exception()
+			QtCore.QCoreApplication.processEvents()
+		return self.results
+
+	def _Async_Run( self, args, kargs ): # Run on other thread
+		# print( "Async_Run Thread:", QtCore.QThread.currentThread() )
+		results = self.function_to_run( *args, **kargs )
+		self.ResultsAcquired_signal.emit( results )
+
+quit_early_flag = Event()
+def Get_Quit_Early_Flag():
+	global quit_early_flag
+	return quit_early_flag
+def Run_Func_Async( context, function, *args, **kargs ):
+	global quit_early_flag
+	x = Run_Async2( context, function, quit_early_flag )
+	return x.Run( *args, **kargs )
+
+if __name__ == "__main__": # Test the threading
+	import time
+	class Test_Threading_Class( QtCore.QObject ):
+		def __init__( self ):
+			QtCore.QObject.__init__(self)
+			print( "__init__" )
+		def thread_start( self ):
+			for i in range( 5 ):
+				print( f"Sleeping {i}" )
+				# QtCore.QCoreApplication.processEvents()
+				time.sleep( 2 )
+
+		def test( self, x, y ):
+			print( "test" )
+			return x + y
+
+	from PyQt5 import QtWidgets
+	import sys
+	app = QtWidgets.QApplication( sys.argv )
+	controller = Test_Threading_Class()
+	thread = QtCore.QThread()
+	controller.moveToThread( thread )
+	thread.started.connect( controller.thread_start )
+	thread.start()
+	print( "Waiting for results" )
+	results = Run_Func_Async( controller, controller.test, 40, 2 )
+	print( results )
 
 class Async_Iterator( QtCore.QObject ):
 	def __init__( self, values_to_run, context, requests_to_prepare, inform_its_ready, should_quit_early ):#, call_this_on_finish = lambda value_run : None ):

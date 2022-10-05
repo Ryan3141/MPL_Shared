@@ -2,21 +2,6 @@ from PyQt5 import QtNetwork, QtCore
 #from PyQt5 import QtGui, QtCore, QtWidgets, QtChart, QtNetwork
 
 
-def Sanitize_SQL( raw_string ):
-	# Got regex from https://stackoverflow.com/questions/9651582/sanitize-table-column-name-in-dynamic-sql-in-net-prevent-sql-injection-attack
-	if( ';' in raw_string ):
-		return ""
-
-	re = QtCore.QRegularExpression( '''^[\p{L}{\p{Nd}}$#_][\p{L}{\p{Nd}}@$#_]*$''' );
-	match = re.match( raw_string );
-	hasMatch = match.hasMatch();
-
-	if( hasMatch ):
-		return raw_string
-	else:
-		return ""
-
-
 class Device:
 	def __init__( self, pSocket ):
 		self.pSocket = pSocket
@@ -114,6 +99,9 @@ class Device_Communicator( QtCore.QObject ):
 		peer_identifier = peer_ip + ":" + str( peer_port );
 		self.active_connections[ peer_identifier ] = Device( pSocket = new_pSocket )
 		connected_device = self.active_connections[ peer_identifier ]
+		connected_device.timer = QtCore.QTimer()
+		connected_device.timer.setSingleShot( True )
+		connected_device.timer.timeout.connect( lambda : self.Socket_Disconnected( peer_identifier, "Timeout" ) )
 		print( QtCore.QDateTime.currentDateTime().toString() + ": Response from {}:{}".format( peer_ip, peer_port ) )
 		# Tell TCP socket to timeout if unexpectedly disconnected
 		new_pSocket.setSocketOption( QtNetwork.QAbstractSocket.KeepAliveOption, 1 );
@@ -121,9 +109,6 @@ class Device_Communicator( QtCore.QObject ):
 		new_pSocket.disconnected.connect( lambda : self.Socket_Disconnected(peer_identifier, "Socket Disconnected") )
 		new_pSocket.readyRead.connect( lambda : self.Read_From_Socket(peer_identifier) )
 		self.Device_Connected.emit( peer_identifier )
-		connected_device.timer = QtCore.QTimer()
-		connected_device.timer.setSingleShot( True )
-		connected_device.timer.timeout.connect( lambda : self.Socket_Disconnected( peer_identifier, "Timeout" ) )
 		connected_device.timer.start( self.timeout_ms )
 
 	def Socket_Disconnected( self, peer_identifier, reasoning ):

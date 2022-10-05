@@ -9,7 +9,8 @@ import numpy as np
 import time
 import csv
 from PyQt5 import QtCore
-
+from PyQt5.QtCore import QTimer
+from .GUI_Tools import debug_print
 
 class IV_Controller( QtCore.QObject ):
 	newSweepStarted_signal = QtCore.pyqtSignal()
@@ -20,6 +21,8 @@ class IV_Controller( QtCore.QObject ):
 	Device_Connected = QtCore.pyqtSignal(str,str)
 	Device_Disconnected = QtCore.pyqtSignal(str,str)
 	Bias_Is_Set = QtCore.pyqtSignal( float, float ) # args: Voltage set (in V), Current (in A)
+	Bias_Is_Off = QtCore.pyqtSignal()
+	Current_Output = QtCore.pyqtSignal( float ) # Current (in A)
 
 	Error_signal = QtCore.pyqtSignal( str )
 
@@ -28,6 +31,7 @@ class IV_Controller( QtCore.QObject ):
 		self.machine_type = machine_type
 		self.gpib_resource = None
 		self.stop_measurement_early = False
+		self.keep_measuring_current = None
 
 	def thread_start( self ):
 		self.Initialize_Connection()
@@ -62,13 +66,13 @@ class IV_Controller( QtCore.QObject ):
 		#print( rm.list_resources() + "\n" ) # List available machines to connect to
 
 		# whats_available = rm.list_resources()
-		self.supported_devices = { "Keysight" : ( 'GPIB::23::INSTR', (self.Voltage_Sweep_Keysight, self.Set_Bias_Keysight, self.Turn_Off_Bias_Keysight) ), # Keysight B2962A's address on GPIB connection with IEEE-446 protocol
-								   "Keithley" : ( 'GPIB::26::INSTR', (self.Voltage_Sweep_Keithley, self.Set_Bias_Keithley, self.Turn_Off_Bias_Keithley) ) } # Keithley 236's address on GPIB connection with IEEE-446 protocol
+		self.supported_devices = { "Keysight" : ( 'GPIB::23::INSTR', (self.Voltage_Sweep_Keysight, self.Set_Bias_Keysight, self.Turn_Off_Bias_Keysight, self.Get_Current_Keysight) ), # Keysight B2962A's address on GPIB connection with IEEE-446 protocol
+								   "Keithley" : ( 'GPIB::26::INSTR', (self.Voltage_Sweep_Keithley, self.Set_Bias_Keithley, self.Turn_Off_Bias_Keithley, self.Get_Current_Keithley) ) } # Keithley 236's address on GPIB connection with IEEE-446 protocol
 
 		try:
 			lambda *args, **kargs : self.Check_Connection()
 			address = self.supported_devices[ self.machine_type ][0]
-			self._Voltage_Sweep, self._Set_Bias, self._Turn_Off_Bias = ( self.Check_Connection_Then_Run(x) for x in self.supported_devices[ self.machine_type ][1] )
+			self._Voltage_Sweep, self._Set_Bias, self._Turn_Off_Bias, self._Get_Current = ( self.Check_Connection_Then_Run(x) for x in self.supported_devices[ self.machine_type ][1] )
 			self.resource_manager = visa.ResourceManager()
 			self.gpib_resource = self.resource_manager.open_resource(address)
 			self.gpib_resource.clear()
@@ -92,19 +96,33 @@ class IV_Controller( QtCore.QObject ):
 
 
 	def Set_Bias( self, bias_V ):
-		self._Set_Bias( bias_V )
+		result = self._Set_Bias( bias_V )
+		# self.keep_measuring_current = QTimer( self )
+		# self.keep_measuring_current.timeout.connect( self.Get_Current_Keithley )
+		# self.keep_measuring_current.start( 500 ) # milliseconds (repeat)
+		return result
 
 	def Turn_Off_Bias( self ):
 		self._Turn_Off_Bias()
+		if self.keep_measuring_current is not None:
+			self.keep_measuring_current.stop()
+
+		self.Bias_Is_Off.emit()
 
 	def Voltage_Sweep( self, input_start, input_end, input_step, time_interval ):
 		self._Voltage_Sweep( input_start, input_end, input_step, time_interval )
+
+	def Get_Current( self ):
+		return self._Get_Current()
 
 	def _Set_Bias( self, bias_V ):
 		pass
 
 	def _Turn_Off_Bias( self ):
 		print( "Running Default Turn_Off_Bias" )
+		pass
+
+	def _Get_Current( self ):
 		pass
 
 	def _Voltage_Sweep( self, input_start, input_end, input_step, time_interval ):
@@ -129,6 +147,8 @@ class IV_Controller( QtCore.QObject ):
 
 		# K.write( "T4,0,0,0X" ) # Set triggering after H0X command and continue immediately
 		# K.write( "R1X" ) # Enable Triggers
+		K.write( "O1X" ) # Change to remote sensing (4 point probe) O1 or 2 point probe O0
+		K.write( "L25E-3,0X" ) # Set compliance to 25 mA, range (0 for autorange)
 
 		K.write( "N1X" ) # Set machine to active mode
 		# K.write( "H0X" ) # Send immediate trigger
@@ -137,14 +157,31 @@ class IV_Controller( QtCore.QObject ):
 		K.write( "G4,2,1X" ) # Set reading format to read raw results one by one
 		try:
 			current = float( K.read() )
-			print( f"Bias = {bias_V} V" )
-			print( f"current = {current} A" )
+			debug_print( f"Bias = {bias_V} V" )
+			debug_print( f"current = {current} A" )
 			self.Bias_Is_Set.emit( bias_V, current )
 		except visa.errors.VisaIOError as e:
 			print( f"Failed to set Bias: {str(e)}" )
+			current = None
+
+		return current
+
+	def Get_Current_Keithley( self ):
+		K = self.gpib_resource
+		K.timeout = 5 * 1000 # Timeout in milliseconds
+
+		K.write( "G4,2,1X" ) # Set reading format to read raw results one by one
+		try:
+			current = float( K.read() )
+			self.Current_Output.emit( current )
+		except visa.errors.VisaIOError as e:
+			current = None
+			print( f"Failed to read current: {str(e)}" )
+		return current
 
 	def Turn_Off_Bias_Keithley( self ):
 		K = self.gpib_resource
+		self.Current_Output.emit( 0.0 )
 		K.write( "N0X" ) # Return machine to standby
 
 	def Voltage_Sweep_Keithley( self, input_start, input_end, input_step, time_interval ):
@@ -215,13 +252,25 @@ class IV_Controller( QtCore.QObject ):
 		K.write(f":SENS{channel}:CURR:PROT {compliance_A}")  # Set compliance current
 		K.write(f":OUTP{channel} ON")  # Enable channel
 		try:
-			current = K.query_ascii_values(':MEAS:CURR?', container=np.array) # Read current values
-			print( f"Bias = {bias_V} V" )
-			print( f"current = {current} A" )
-			if len(current) > 0:
-				self.Bias_Is_Set.emit( bias_V, current[0] )
+			current = K.query_ascii_values(':MEAS:CURR?', container=np.array)[0] # Read current values
+			debug_print( f"Bias = {bias_V} V" )
+			debug_print( f"current = {current} A" )
+			self.Bias_Is_Set.emit( bias_V, current )
 		except visa.errors.VisaIOError as e:
 			print( "Failed to measure bias" )
+
+		return current
+
+	def Get_Current_Keysight( self ):
+		K = self.gpib_resource
+		channel = 1 # or 2
+		try:
+			current = K.query_ascii_values(':MEAS:CURR?', container=np.array)[0] # Read current values
+			self.Current_Output.emit( current )
+		except visa.errors.VisaIOError as e:
+			current = None
+			print( f"Failed to read current: {str(e)}" )
+		return current
 
 	def Turn_Off_Bias_Keysight( self ):
 		K = self.gpib_resource
@@ -388,7 +437,7 @@ class IV_Controller( QtCore.QObject ):
 				self.noiseMeasurementFinished_signal.emit( currents )
 				print( currents )
 				plt.plot( currents, label=f"{compliance_A}")
-				
+
 			except visa.errors.VisaIOError as e:
 				print( e )
 

@@ -17,6 +17,7 @@ from rich import print
 from PyQt5 import QtCore
 
 from .Device_Communicator import Device_Communicator
+from .GUI_Tools import debug_print
 
 class Current_State:
 	def __init__( self ):
@@ -50,6 +51,9 @@ class Temperature_Controller( QtCore.QObject ):
 		self.connection_timeout = connection_timeout
 		self.triggered_temp_stable_already = False
 		self.case_temperature = None
+		self.pads_connected = (1, 2)
+		self.pads_reversed = False
+		self.pads_change_ready = True
 
 	def thread_start( self ):
 		config = configparser.ConfigParser()
@@ -84,6 +88,8 @@ class Temperature_Controller( QtCore.QObject ):
 		self.past_temperatures = deque( maxlen=self.stable_temperature_sample_count )
 		self.past_heater_output = deque( maxlen=self.stable_temperature_sample_count )
 
+		self.Temperature_Changed.connect( self.Check_If_Temperature_Is_Stable )
+
 		# Continuously recheck temperature controller
 		self.connection_timeout_timer = QtCore.QTimer( self )
 		self.connection_timeout_timer.timeout.connect( self.Update )
@@ -114,12 +120,16 @@ class Temperature_Controller( QtCore.QObject ):
 		self.device_communicator.Send_Command( message )
 
 	def Set_Active_Pads( self, pad1, pad2 ):
+		self.pads_change_ready = False
 		self.status.pads_selected = (pad1, pad2)
 		message = ("set pads {} {};\n".format( pad1, pad2 ) )
 		if self.serial_connection is not None:
 			self.serial_connection.write( message.encode() )
 
 		self.device_communicator.Send_Command( message )
+		while( not self.pads_change_ready ):
+			QtCore.QCoreApplication.processEvents()
+		return self.status.pads_selected, self.pads_reversed
 
 	def Attempt_Serial_Connection( self ):
 		for port in GetAvailablePorts():
@@ -159,7 +169,7 @@ class Temperature_Controller( QtCore.QObject ):
 					self.serial_connection = None
 
 	def Set_Temperature_In_K( self, temperature_in_k ):
-		print( "Setting output temperature to " + str(temperature_in_k) )
+		debug_print( "Setting output temperature to " + str(temperature_in_k) )
 		self.status.set_temperature = temperature_in_k
 		temperature_in_c = temperature_in_k - 273.15
 		self.setpoint_temperature = temperature_in_k
@@ -172,7 +182,7 @@ class Temperature_Controller( QtCore.QObject ):
 
 	def Turn_On( self ):
 		self.status.pid_is_on = True
-		print( "Turning heater On" )
+		debug_print( "Turning heater On" )
 		message = ("turn on;\n")
 		if self.serial_connection is not None:
 			self.serial_connection.write( message.encode() )
@@ -182,7 +192,7 @@ class Temperature_Controller( QtCore.QObject ):
 
 	def Turn_Off( self ):
 		self.status.pid_is_on = False
-		print( "Turning heater off" )
+		debug_print( "Turning heater off" )
 		message = ("turn off;\n")
 		if self.serial_connection is not None:
 			self.serial_connection.write( message.encode() )
@@ -214,17 +224,8 @@ class Temperature_Controller( QtCore.QObject ):
 				if( temp < 0 or temp > 1000 ):
 					return
 				self.current_temperature = temp
-				self.Temperature_Changed.emit( self.current_temperature )
-				temp_is_stable, out_of_nitrogen, last_temperature = self.Check_If_Temperature_Is_Stable( self.current_temperature )
-				if( temp_is_stable and not self.triggered_temp_stable_already ):
-					self.triggered_temp_stable_already = True
-					# if out_of_nitrogen:
-					# 	print( f"Probably out of nitrogen, running at {round(last_temperature, 2)} intended at {round(self.setpoint_temperature, 2)}")
-					# 	self.Set_PID( 0, 0, 0 )
-					# 	self.Temperature_Stable.emit( round(last_temperature, 2) )
-					# else:
-					print( f"Temperature stable around: {round(self.setpoint_temperature, 2)}" )
-					self.Temperature_Stable.emit( round(self.current_temperature, 2) )
+				self.past_temperatures.append( temp )
+				self.Temperature_Changed.emit( temp )
 
 		pid_output_pattern = re.compile( 'PID Output:\s*({})'.format( pattern_of_a_float ) ) # Grab any properly formatted floating point number
 		m2 = pid_output_pattern.search( message )
@@ -248,13 +249,14 @@ class Temperature_Controller( QtCore.QObject ):
 		pads_selected_pattern = re.compile( 'Pads connected (\d+)\s+(\d+)( reversed)?' ) # Grab any properly formatted floating point number
 		m5 = pads_selected_pattern.search( message )
 		if( m5 ):
-			pads_connected = tuple( int( m5.group(i) ) for i in range(1, 3) )
+			self.status.pads_selected = tuple( int( m5.group(i) ) for i in range(1, 3) )
 			if m5.group(3) == " reversed":
-				print( "Pads reversed" )
-				is_reversed = True
+				debug_print( "Pads reversed" )
+				self.pads_reversed = True
 			else:
-				is_reversed = False
-			self.Pads_Selected_Changed.emit( pads_connected, is_reversed )
+				self.pads_reversed = False
+			self.Pads_Selected_Changed.emit( self.status.pads_selected, self.pads_reversed )
+			self.pads_change_ready = True
 
 		if( message.find( "Unable to connect pads" ) != -1 ):
 			self.Pads_Selected_Invalid.emit()
@@ -284,30 +286,40 @@ class Temperature_Controller( QtCore.QObject ):
 		self.Set_Temperature_In_K( temperature_in_k )
 		self.Turn_On()
 
-	def Check_If_Temperature_Is_Stable( self, new_temperature_in_k ):
-		self.past_temperatures.append( new_temperature_in_k )
+	def Wait_For_Stable_Temperature( self ):
+		while( not self.Check_If_Temperature_Is_Stable() ):
+			QtCore.QCoreApplication.processEvents()
 
+		return self.past_temperatures[-1]
+
+	def Check_If_Temperature_Is_Stable( self ):
 		if( len(self.past_temperatures) < self.stable_temperature_sample_count ):
-			return False, False, new_temperature_in_k
+			return False
+		last_temperature = self.past_temperatures[-1]
 
 		heater_not_on_in_a_while = np.average( np.array( self.past_heater_output ) ) < 0.5
 		temps_as_array = np.array( self.past_temperatures )
 		error = temps_as_array - self.setpoint_temperature
 		change_over_time = temps_as_array[len(temps_as_array) // 2:] - temps_as_array[:-len(temps_as_array) // 2]
 		temp_keeps_going_up = np.average( change_over_time > 0 ) > 0.8 # If it's increasing more than 80 % of the time
-		probably_out_of_nitrogen = temp_keeps_going_up and heater_not_on_in_a_while and new_temperature_in_k > self.setpoint_temperature
+		probably_out_of_nitrogen = temp_keeps_going_up and heater_not_on_in_a_while and last_temperature > self.setpoint_temperature
 		if np.amax( np.fabs( error ) ) <= 1 or probably_out_of_nitrogen:
 			temp_is_stable = True
 		else:
 			temp_is_stable = False
 
-		return temp_is_stable, probably_out_of_nitrogen, new_temperature_in_k
-#		deviation = np.std( error )
-#		average_error = np.mean( error )
-#		if( abs(average_error) < .5 and deviation < 0.2 ):
-#			return True
-#		else:
-#			return False
+		if( temp_is_stable and not self.triggered_temp_stable_already ):
+			self.triggered_temp_stable_already = True
+			if probably_out_of_nitrogen:
+				print( f"Probably out of nitrogen, running at {last_temperature:0.2f} intended at {self.setpoint_temperature:0.2f}")
+				# self.Set_PID( 0, 0, 0 )
+				self.Temperature_Stable.emit( round(last_temperature, 2) )
+			else:
+				print( f"Temperature stable around: {self.setpoint_temperature:0.2f}" )
+				self.Temperature_Stable.emit( round(self.current_temperature, 2) )
+
+		return temp_is_stable
+
 
 	def Set_Transimpedance_Gain( self, gain ):
 		if gain == 0:

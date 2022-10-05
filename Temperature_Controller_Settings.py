@@ -2,7 +2,7 @@ from PyQt5 import QtNetwork, QtCore, QtGui, uic, QtWidgets
 
 import os
 
-from .GUI_Tools import resource_path
+from .GUI_Tools import resource_path, debug_print
 
 
 qtConfigurationUIFile = resource_path( "Temperature_Controller_Settings.ui" ) # GUI layout file.
@@ -81,7 +81,7 @@ class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWin
 			self.Pads_Selected_Error()
 
 	def PID_Coefficients_Updated( self, pid_coefficients ):
-		print( "PID Coefficients: {}".format(pid_coefficients) )
+		debug_print( "PID Coefficients: {}".format(pid_coefficients) )
 		self.kp_lineEdit.setText( str( pid_coefficients[0] ) )
 		self.ki_lineEdit.setText( str( pid_coefficients[1] ) )
 		self.kd_lineEdit.setText( str( pid_coefficients[2] ) )
@@ -90,7 +90,7 @@ class TemperatureControllerSettingsWindow(QtWidgets.QWidget, Ui_ConfigurationWin
 		self.kd_lineEdit.setStyleSheet( green_background_text )
 
 	def Pads_Selected_Updated( self, pads_selected, is_reversed ):
-		print( "Pads Connected: {}".format(pads_selected) )
+		debug_print( "Pads Connected: {}".format(pads_selected) )
 		self.pad1_lineEdit.setText( str( pads_selected[0] )  )
 		self.pad2_lineEdit.setText( str( pads_selected[1] ) )
 		self.pad1_lineEdit.setStyleSheet( green_background_text )
