@@ -15,6 +15,7 @@ from .GUI_Tools import debug_print
 class IV_Controller( QtCore.QObject ):
 	newSweepStarted_signal = QtCore.pyqtSignal()
 	dataPointGotten_signal = QtCore.pyqtSignal(float, float) # Voltage (in V), Current (in A)
+	sweepUpdated_signal = QtCore.pyqtSignal(np.ndarray, np.ndarray) # Voltages (in V), Currents (in A)
 	sweepFinished_signal = QtCore.pyqtSignal(np.ndarray, np.ndarray) # Voltages (in V), Currents (in A)
 	noiseMeasurementFinished_signal = QtCore.pyqtSignal(np.ndarray) # Currents (in A)
 
@@ -26,9 +27,8 @@ class IV_Controller( QtCore.QObject ):
 
 	Error_signal = QtCore.pyqtSignal( str )
 
-	def __init__( self, parent=None, machine_type="Keithley" ):
+	def __init__( self, parent=None ):
 		super(IV_Controller, self).__init__(parent)
-		self.machine_type = machine_type
 		self.gpib_resource = None
 		self.stop_measurement_early = False
 		self.keep_measuring_current = None
@@ -42,23 +42,22 @@ class IV_Controller( QtCore.QObject ):
 	def Make_Safe( self ):
 		self.Turn_Off_Bias()
 
-	def Check_Connection_Then_Run( self, func ):
-		def newfunc( *args, **kargs ):
-			if self.gpib_resource == None:
-				print( func )
-				self.Error_signal.emit( "IV controller not connected" )
-				return
-			try:
-				return func( *args, **kargs )
-			except Exception as e:
-				self.Device_Disconnected.emit( self.machine_type, self.supported_devices[ self.machine_type ][0] )
-				print( func )
-				self.Error_signal.emit( f"IV controller not connected {str(e)}" )
-				return
+	# def Check_Connection_Then_Run( self, func ):
+	# 	def newfunc( *args, **kargs ):
+	# 		if self.gpib_resource == None:
+	# 			print( func )
+	# 			self.Error_signal.emit( "IV controller not connected" )
+	# 			return
+	# 		try:
+	# 			return func( *args, **kargs )
+	# 		except Exception as e:
+	# 			self.Device_Disconnected.emit( self.machine_type, self.supported_devices[ self.machine_type ][0] )
+	# 			print( func )
+	# 			self.Error_signal.emit( f"IV controller not connected {str(e)}" )
+	# 			return
 
-		newfunc.func = func
-		return newfunc
-
+	# 	newfunc.func = func
+	# 	return newfunc
 	def Initialize_Connection( self ):
 		if self.gpib_resource != None:
 			self.gpib_resource.close()
@@ -66,66 +65,32 @@ class IV_Controller( QtCore.QObject ):
 		#print( rm.list_resources() + "\n" ) # List available machines to connect to
 
 		# whats_available = rm.list_resources()
-		self.supported_devices = { "Keysight" : ( 'GPIB::23::INSTR', (self.Voltage_Sweep_Keysight, self.Set_Bias_Keysight, self.Turn_Off_Bias_Keysight, self.Get_Current_Keysight) ), # Keysight B2962A's address on GPIB connection with IEEE-446 protocol
-								   "Keithley" : ( 'GPIB::26::INSTR', (self.Voltage_Sweep_Keithley, self.Set_Bias_Keithley, self.Turn_Off_Bias_Keithley, self.Get_Current_Keithley) ) } # Keithley 236's address on GPIB connection with IEEE-446 protocol
 
 		try:
 			lambda *args, **kargs : self.Check_Connection()
-			address = self.supported_devices[ self.machine_type ][0]
-			self._Voltage_Sweep, self._Set_Bias, self._Turn_Off_Bias, self._Get_Current = ( self.Check_Connection_Then_Run(x) for x in self.supported_devices[ self.machine_type ][1] )
 			self.resource_manager = visa.ResourceManager()
-			self.gpib_resource = self.resource_manager.open_resource(address)
+			name, address = self.Get_Setup_Data()
+			self.gpib_resource = self.resource_manager.open_resource( address )
 			self.gpib_resource.clear()
-			self.Device_Connected.emit( self.machine_type, self.supported_devices[ self.machine_type ][0] )
+			self.Device_Connected.emit( name, address )
 			self.is_connected = True
 			return self.gpib_resource
-		except Exception:
+		except Exception as e:
+			print( e )
 			self.is_connected = False
 
 		self.debug = 1
 		return None
-
 
 	def Close_Connection( self ):
 		if self.gpib_resource == None:
 			return
 		self.gpib_resource.close()
 		self.gpib_resource = None
-
-		self.Device_Disconnected.emit( self.machine_type, self.supported_devices[ self.machine_type ][0] )
-
-
-	def Set_Bias( self, bias_V ):
-		result = self._Set_Bias( bias_V )
-		# self.keep_measuring_current = QTimer( self )
-		# self.keep_measuring_current.timeout.connect( self.Get_Current_Keithley )
-		# self.keep_measuring_current.start( 500 ) # milliseconds (repeat)
-		return result
-
-	def Turn_Off_Bias( self ):
-		self._Turn_Off_Bias()
-		if self.keep_measuring_current is not None:
-			self.keep_measuring_current.stop()
-
-		self.Bias_Is_Off.emit()
+		name, address = self.Get_Setup_Data()
+		self.Device_Disconnected.emit( name, address )
 
 	def Voltage_Sweep( self, input_start, input_end, input_step, time_interval ):
-		self._Voltage_Sweep( input_start, input_end, input_step, time_interval )
-
-	def Get_Current( self ):
-		return self._Get_Current()
-
-	def _Set_Bias( self, bias_V ):
-		pass
-
-	def _Turn_Off_Bias( self ):
-		print( "Running Default Turn_Off_Bias" )
-		pass
-
-	def _Get_Current( self ):
-		pass
-
-	def _Voltage_Sweep( self, input_start, input_end, input_step, time_interval ):
 		x_values = np.arange( input_start, input_end + input_step / 2, input_step )
 		self.newSweepStarted_signal.emit()
 		time.sleep( 0.1 )
@@ -137,7 +102,15 @@ class IV_Controller( QtCore.QObject ):
 		self.debug += 1
 		return
 
-	def Set_Bias_Keithley( self, bias_V ):
+
+class Keithley236( IV_Controller ):
+	def __init__( self, parent=None ):
+		super(Keithley236, self).__init__(parent)
+
+	def Get_Setup_Data( self ):
+		return ( "Keithley", 'GPIB::26::INSTR' ) # Keysight B2962A's address on GPIB connection with IEEE-446 protocol
+
+	def Set_Bias( self, bias_V ):
 		K = self.gpib_resource
 		compliance_A = 25E-3 # Amps
 		range = 0 # auto
@@ -166,7 +139,7 @@ class IV_Controller( QtCore.QObject ):
 
 		return current
 
-	def Get_Current_Keithley( self ):
+	def Get_Current( self ):
 		K = self.gpib_resource
 		K.timeout = 5 * 1000 # Timeout in milliseconds
 
@@ -179,12 +152,12 @@ class IV_Controller( QtCore.QObject ):
 			print( f"Failed to read current: {str(e)}" )
 		return current
 
-	def Turn_Off_Bias_Keithley( self ):
+	def Turn_Off_Bias( self ):
 		K = self.gpib_resource
 		self.Current_Output.emit( 0.0 )
 		K.write( "N0X" ) # Return machine to standby
 
-	def Voltage_Sweep_Keithley( self, input_start, input_end, input_step, time_interval ):
+	def Voltage_Sweep( self, input_start, input_end, input_step, time_interval ):
 		time.sleep( 2 ) # Sleep to make sure heater has time to turn off
 		Keithley = self.gpib_resource
 		self.newSweepStarted_signal.emit()
@@ -241,15 +214,27 @@ class IV_Controller( QtCore.QObject ):
 		else:
 			self.sweepFinished_signal.emit( x_values, np.array(results) )
 
-	def Set_Bias_Keysight( self, bias_V ):
+
+class KeysightB2962A( IV_Controller ):
+	def __init__( self, parent=None ):
+		super(KeysightB2962A, self).__init__(parent)
+
+	def Get_Setup_Data( self ):
+		return ( "Keysight", 'GPIB::23::INSTR' ) # Keysight B2962A's address on GPIB connection with IEEE-446 protocol
+
+	def Set_Bias( self, bias_V ):
 		K = self.gpib_resource
 		channel = 1 # or 2
 		compliance_A = 2E-3 # Amps
 		K.write(f":SOUR{channel}:FUNC:MODE VOLT") # Source voltage (VOLT) not current (CURR)
 		K.write(f":SOUR{channel}:VOLT {bias_V}") # Set amount
 		K.write(f":SENS{channel}:REM ON") # Enable remote sense (4-wire)
-
+		
+		K.write(f":SENS{channel}:FUNC CURR")  # Set compliance current
 		K.write(f":SENS{channel}:CURR:PROT {compliance_A}")  # Set compliance current
+		K.write(f":TRIG:SOUR AINT")  # Set trigger to internal to allow for continuous measurement
+		K.write(f":TRIG:TIM 10E-3")  # Set trigger to internal to allow for continuous measurement
+		# K.write(f":SOUR:FUNC:TRIG:CONT 1")  # Set trigger to internal to allow for continuous measurement
 		K.write(f":OUTP{channel} ON")  # Enable channel
 		try:
 			current = K.query_ascii_values(':MEAS:CURR?', container=np.array)[0] # Read current values
@@ -261,7 +246,7 @@ class IV_Controller( QtCore.QObject ):
 
 		return current
 
-	def Get_Current_Keysight( self ):
+	def Get_Current( self ):
 		K = self.gpib_resource
 		channel = 1 # or 2
 		try:
@@ -272,12 +257,12 @@ class IV_Controller( QtCore.QObject ):
 			print( f"Failed to read current: {str(e)}" )
 		return current
 
-	def Turn_Off_Bias_Keysight( self ):
+	def Turn_Off_Bias( self ):
 		K = self.gpib_resource
 		channel = 1 # or 2
 		K.write(f":OUTP{channel} OFF")  # Enable channel
 
-	def Voltage_Sweep_Keysight( self, input_start, input_end, input_step, delay_after_source ):
+	def Voltage_Sweep( self, input_start, input_end, input_step, delay_after_source ):
 		K = self.gpib_resource
 
 		K.write("*RST") # Reset everything to known good state (factory defaults)
@@ -292,13 +277,22 @@ class IV_Controller( QtCore.QObject ):
 		number_of_powerline_cycles = 1
 		voltages = np.arange( int(input_start * 1E9), int(input_end * 1E9) + 1, int(input_step * 1E9) ) / 1E9
 
-		left = np.arange( int(-2.0 * 1E9), int(-0.1 * 1E9) + 1, int(0.05 * 1E9) ) / 1E9
-		middle = np.arange( int(-0.1 * 1E9), int(0.1 * 1E9) + 1, int(0.001 * 1E9) ) / 1E9
-		right = np.arange( int(0.1 * 1E9), int( 2.0 * 1E9) + 1, int(0.05 * 1E9) ) / 1E9
-		voltages = np.concatenate( (left, middle, right), axis=0 )
+		if input_step == 0:
+			left = np.arange( int(-2.0 * 1E9), int(-0.1 * 1E9) + 1, int(0.05 * 1E9) ) / 1E9
+			middle = np.arange( int(-0.1 * 1E9), int(0.1 * 1E9) + 1, int(0.001 * 1E9) ) / 1E9
+			right = np.arange( int(0.1 * 1E9), int( 2.0 * 1E9) + 1, int(0.05 * 1E9) ) / 1E9
+			voltages = np.concatenate( (left, middle, right), axis=0 )
 		# print( voltages )
 		# voltages = np.linspace( 0.0, 1.0, 5 )
 		results_by_compliance = []
+
+		def get_merged_results( results_by_compliance ):
+			output_y = results_by_compliance[0]
+			for c, y in zip( compliances[:-1], results_by_compliance[1:] ):
+				filter_over_compliance = (y - c > -1E-2 * c) | (y + c < 1E-2 * c)
+				output_y[ filter_over_compliance ] = y[ filter_over_compliance ]
+			return output_y
+
 		for compliance_A in compliances:
 			### For voltage sweep ###
 			K.write(f":SOUR{channel}:FUNC:MODE VOLT") # Source voltage (VOLT) not current (CURR)
@@ -347,6 +341,7 @@ class IV_Controller( QtCore.QObject ):
 			try:
 				currents = K.query_ascii_values(':FETC:ARR:CURR? ', container=np.array) # Read current values
 				results_by_compliance.append( currents )
+				self.sweepUpdated_signal.emit( voltages, get_merged_results( results_by_compliance ) )
 
 				filter_over_compliance = (currents - compliance_A > -1E-2 * compliance_A) | (currents + compliance_A < 1E-2 * compliance_A)
 				needs_higher_compliance = np.any( filter_over_compliance )
@@ -361,15 +356,10 @@ class IV_Controller( QtCore.QObject ):
 		if len(results_by_compliance) == 0:
 			return
 
-		output_y = results_by_compliance[0]
-		for c, y in zip( compliances[:-1], results_by_compliance[1:] ):
-			filter_over_compliance = (y - c > -1E-2 * c) | (y + c < 1E-2 * c)
-			output_y[ filter_over_compliance ] = y[ filter_over_compliance ]
-
 		# K.timeout = 120000 # The measurement may take up to 120 seconds
-		self.sweepFinished_signal.emit( voltages, np.array(output_y) )
+		self.sweepFinished_signal.emit( voltages, get_merged_results( results_by_compliance ) )
 
-	def Voltage_Noise_Keysight( self, bias_v, integration_time_s, sample_count ):
+	def Voltage_Noise( self, bias_v, integration_time_s, sample_count ):
 		K = self.gpib_resource
 
 		K.write("*RST") # Reset everything to known good state (factory defaults)
@@ -435,23 +425,31 @@ class IV_Controller( QtCore.QObject ):
 				currents = K.query_ascii_values(':FETC:ARR:CURR?', container=np.array) # Read current values
 				print( f"Compliance: {compliance_A} {abs(currents[0]) < 0.9 * compliance_A}")
 				self.noiseMeasurementFinished_signal.emit( currents )
-				print( currents )
-				plt.plot( currents, label=f"{compliance_A}")
+				# print( currents )
+				# plt.plot( currents, label=f"{compliance_A}")
 
 			except visa.errors.VisaIOError as e:
 				print( e )
 
 		K.write(f":OUTP{channel} OFF")  # Disable channel
-		with open( "test_noise.csv", 'w' ) as csvfile:
-			csvwriter = csv.writer( csvfile )
-			for c in currents:
-				csvwriter.writerow( [c], lineterminator="\n" )
-		plt.legend()
-		plt.show(block=True)
+		# with open( "test_noise.csv", 'w' ) as csvfile:
+		# 	csvwriter = csv.writer( csvfile )
+		# 	for c in currents:
+		# 		csvwriter.writerow( [c], lineterminator="\n" )
+		# plt.legend()
+		# plt.show(block=True)
 
 
 if __name__ == "__main__":
-	iv = IV_Controller( machine_type="Keysight" )
+	iv = KeysightB2962A()
 	iv.Initialize_Connection()
-	iv.Voltage_Noise_Keysight( bias_v=-0.025, integration_time_s=5E-5, sample_count=10000 )
-	iv.Turn_Off_Bias_Keysight()
+	iv.Set_Bias( 0.1 )
+	def pause_then_run():
+		time.sleep( 0.5 )
+		return iv.Get_Current()
+	test = [ pause_then_run() for i in range(20) ]
+	iv.Turn_Off_Bias()
+	plt.plot( test )
+	plt.show( block=True )
+	iv.Voltage_Noise( bias_v=-0.025, integration_time_s=5E-5, sample_count=10000 )
+	iv.Turn_Off_Bias()
